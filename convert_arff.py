@@ -4,7 +4,10 @@ import csv
 def convert_arff_to_csv(arff_path, csv_path):
     print("Lecture du fichier ARFF...")
     
+<<<<<<< Updated upstream
     # 1. Trouver où commencent les données (après le mot-clé @data)
+=======
+>>>>>>> Stashed changes
     with open(arff_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     
@@ -14,6 +17,7 @@ def convert_arff_to_csv(arff_path, csv_path):
             data_start_idx = i + 1
             break
             
+<<<<<<< Updated upstream
     # 2. Récupérer les noms des colonnes (après le mot-clé @attribute)
     columns = []
     for line in lines[:data_start_idx]:
@@ -23,10 +27,13 @@ def convert_arff_to_csv(arff_path, csv_path):
             columns.append(col_name)
             
     # 3. Lire les données ligne par ligne en ignorant les lignes vides
+=======
+>>>>>>> Stashed changes
     data = []
     for line in lines[data_start_idx:]:
         line = line.strip()
         if line: # Si la ligne n'est pas vide
+<<<<<<< Updated upstream
             # On sépare par des virgules et on enlève les espaces autour des valeurs
             row = [val.strip().strip("'\"") for val in line.split(',')]
             data.append(row)
@@ -46,6 +53,40 @@ def convert_arff_to_csv(arff_path, csv_path):
 if __name__ == "__main__":
     # On indique où se trouve le fichier source et où on veut le sauvegarder
     # (Adaptez le chemin si votre .arff n'est pas dans data/)
+=======
+            # On sépare par la virgule
+            row = [val.strip().strip("'\"") for val in line.split(',')]
+            # Si la ligne a 26 éléments au lieu de 25, on enlève le dernier (souvent une virgule en trop)
+            if len(row) > 25:
+                row = row[:25]
+            # Si la ligne a 24 éléments, on la complète avec des "?" (manquant)
+            elif len(row) < 25:
+                row += ['?'] * (25 - len(row))
+            data.append(row)
+            
+    # Noms des colonnes officielles
+    columns = [
+        'age', 'bp', 'sg', 'al', 'su', 'rbc', 'pc', 'pcc', 'ba', 'bgr', 
+        'bu', 'sc', 'sod', 'pot', 'hemo', 'pcv', 'wc', 'rc', 'htn', 'dm', 
+        'cad', 'appet', 'pe', 'ane', 'class'
+    ]
+    
+    df = pd.DataFrame(data, columns=columns)
+    
+    # Remplacer les '?' par de vrais NaN
+    df = df.replace('?', pd.NA)
+    
+    # Nettoyage des espaces
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].str.strip()
+        
+    df.to_csv(csv_path, index=False)
+    print("✅ Conversion réussie !")
+    print(f"Dimensions : {df.shape[0]} lignes, {df.shape[1]} colonnes.")
+    print(df.head(3))
+
+if __name__ == "__main__":
+>>>>>>> Stashed changes
     source = 'data/chronic_kidney_disease.arff' 
     destination = 'data/kidney_disease.csv'
     convert_arff_to_csv(source, destination)
