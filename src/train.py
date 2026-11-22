@@ -13,10 +13,9 @@ from sklearn.pipeline import Pipeline
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.preprocessing import get_preprocessor
 
-# 1. Charger les données
+# 1. Charger les données (déjà nettoyées)
 print("Chargement des données...")
-df = pd.read_csv('data/kidney_disease.csv')
-df = df.replace('?', np.nan).replace('\t?', np.nan)
+df = pd.read_csv('data/clean_kidney_disease.csv')
 
 # CORRECTION ICI : Nettoyage agressif de la cible
 df['class'] = df['class'].astype(str).str.lower().str.strip()

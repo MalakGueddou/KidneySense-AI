@@ -15,15 +15,17 @@ def get_preprocessor(X):
     categorical_features = X.select_dtypes(include=['object']).columns
     
     # 2. Créer les étapes pour les chiffres
+    # On garde l'imputation (pour les trous restants) et le Scaler
     numeric_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='median')), # Remplir les vides par la médiane
-        ('scaler', StandardScaler())                   # Mettre à la même échelle
+        ('imputer', SimpleImputer(strategy='median')), 
+        ('scaler', StandardScaler())                   
     ])
     
     # 3. Créer les étapes pour le texte
+    # On garde l'imputation et le OneHotEncoder
     categorical_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='most_frequent')), # Remplir les vides par le plus fréquent
-        ('onehot', OneHotEncoder(handle_unknown='ignore'))    # Transformer en 0/1
+        ('imputer', SimpleImputer(strategy='most_frequent')), 
+        ('onehot', OneHotEncoder(handle_unknown='ignore'))    
     ])
     
     # 4. Assembler le tout
