@@ -1,17 +1,34 @@
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Charger les données
+# 1. Charger les données
 df = pd.read_csv('../data/kidney_disease.csv')
 
-print("Dimensions du dataset :", df.shape)
-print("\n--- Les 5 premières lignes ---")
-print(df.head())
+# 2. Nettoyage rapide : remplacer les '?' et espaces par des NaN
+df = df.replace('?', pd.NA)
+df = df.replace('\t?', pd.NA)
 
-print("\n--- Types de données et valeurs manquantes ---")
-print(df.info())
+# 3. Créer une figure avec 2 graphiques côte à côte
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-print("\n--- Nombre de valeurs manquantes par colonne ---")
-print(df.isnull().sum())
+# Graphique 1 : Distribution de la variable cible (class)
+sns.countplot(data=df, x='class', ax=axes[0], palette='Set2')
+axes[0].set_title("Distribution des classes (CKD vs Non-CKD)")
+axes[0].set_xlabel("Classe")
+axes[0].set_ylabel("Nombre de patients")
 
-print("\n--- Distribution de la variable cible ---")
-print(df['class'].value_counts())
+# Graphique 2 : Carte des valeurs manquantes
+sns.heatmap(df.isnull(), cbar=False, cmap='viridis', ax=axes[1])
+axes[1].set_title("Carte des valeurs manquantes")
+axes[1].set_ylabel("Index des patients")
+
+# Ajuster l'affichage et sauvegarder l'image
+plt.tight_layout()
+plt.savefig('../notebooks/graphique_eda.png') # Sauvegarde l'image dans le dossier notebooks
+print("Graphiques generes et sauvegardes sous le nom 'graphique_eda.png'")
+plt.show()
+
+# 4. Afficher quelques statistiques
+print("\n--- Statistiques descriptives ---")
+print(df.describe())
