@@ -1,43 +1,55 @@
 import pandas as pd
 import numpy as np
 
+
 def clean_data(input_path, output_path):
     print("Chargement des donnees brutes...")
     df = pd.read_csv(input_path)
-    
-    # 1. Remplacer les '?' et les tabulations par de vrais NaN (valeurs manquantes)
-    df = df.replace('?', np.nan)
-    df = df.replace('\t?', np.nan)
-    df = df.replace(' ?', np.nan)
-    
-    # 2. Nettoyer les colonnes textuelles (enlever les espaces et mettre en minuscules)
-    # On identifie les colonnes de type "object" (texte)
-    for col in df.select_dtypes(include=['object']).columns:
+    print(f"Lignes dans le fichier brut : {len(df)}")
+
+    # 0. Supprimer la colonne id si elle existe
+    if "id" in df.columns:
+        df = df.drop(columns="id")
+
+    # 1. Nettoyer les colonnes texte : minuscules, espaces et tabulations enlevés
+    colonnes_texte = df.select_dtypes(exclude="number").columns
+    for col in colonnes_texte:
         df[col] = df[col].astype(str).str.lower().str.strip()
-        
-    # 3. Corriger la colonne cible (class)
-    # On s'assure qu'il n'y a que 'ckd' et 'notckd'
-    df['class'] = df['class'].replace({'ckd\t': 'ckd', 'notckd\t': 'notckd'})
-    # On garde uniquement les lignes valides
-    df = df[df['class'].isin(['ckd', 'notckd'])]
-    
-    # 4. Convertir les colonnes numériques qui sont restées en texte
-    # (Parfois à cause des '?', Pandas lit une colonne de chiffres comme du texte)
-    for col in df.columns:
-        if col != 'class':
-            try:
-                df[col] = pd.to_numeric(df[col])
-            except ValueError:
-                pass # Si ça ne marche pas, on laisse en texte (c'est une vraie catégorie)
-                
-    # 5. Sauvegarder le fichier propre
+
+    # 2. Transformer "?" et "nan" (texte) en vraies valeurs manquantes
+    df = df.replace({"?": np.nan, "nan": np.nan, "": np.nan})
+
+    # 3. Garder seulement les lignes dont la cible est ckd ou notckd
+    valides = df["class"].isin(["ckd", "notckd"])
+    nb_invalides = int((~valides).sum())
+    if nb_invalides > 0:
+        print(f"Lignes exclues (class invalide) : {nb_invalides}")
+    df = df[valides]
+
+    # 4. Convertir en nombres les colonnes qui doivent l'être
+    colonnes_numeriques = ["age", "bp", "sg", "al", "su", "bgr", "bu", "sc",
+                           "sod", "pot", "hemo", "pcv", "wc", "rc"]
+    for col in colonnes_numeriques:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # 5. Supprimer les doublons exacts
+    avant = len(df)
+    df = df.drop_duplicates()
+    print(f"Doublons supprimes : {avant - len(df)}")
+
+    # 6. Sauvegarder (les NaN sont gardés : l'imputation se fera plus tard
+    #    dans le Pipeline, après la séparation train/test)
     df.to_csv(output_path, index=False)
-    print(f"Nettoyage termine ! Fichier sauvegarde sous : {output_path}")
+
+    # 7. Rapport
+    print(f"\nNettoyage termine ! Fichier sauvegarde : {output_path}")
     print(f"Dimensions finales : {df.shape[0]} lignes, {df.shape[1]} colonnes.")
-    
-    # Afficher un aperçu des valeurs manquantes restantes
-    print("\nValeurs manquantes restantes par colonne :")
+    print("\nValeurs manquantes par colonne :")
     print(df.isnull().sum())
+    print("\nDistribution de la cible :")
+    print(df["class"].value_counts())
+
 
 if __name__ == "__main__":
-    clean_data('data/kidney_disease.csv', 'data/clean_kidney_disease.csv')
+    clean_data("data/kidney_disease.csv", "data/clean_kidney_disease.csv")
