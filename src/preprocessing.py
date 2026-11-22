@@ -5,34 +5,33 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 
+
 def get_preprocessor(X):
     """
     Crée un pipeline de préparation des données.
-    X est le DataFrame contenant les caractéristiques (features) sans la cible.
+    X est le DataFrame contenant les caractéristiques (sans la cible).
     """
-    # 1. Séparer les colonnes numériques et textuelles
-    numeric_features = X.select_dtypes(include=['int64', 'float64']).columns
-    categorical_features = X.select_dtypes(include=['object']).columns
-    
-    # 2. Créer les étapes pour les chiffres
-    # On garde l'imputation (pour les trous restants) et le Scaler
+    # 1. Séparer les colonnes numériques et textuelles (en listes Python)
+    numeric_features = X.select_dtypes(include="number").columns.tolist()
+    categorical_features = X.select_dtypes(exclude="number").columns.tolist()
+
+    # 2. Étapes pour les colonnes numériques
     numeric_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='median')), 
-        ('scaler', StandardScaler())                   
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler())
     ])
-    
-    # 3. Créer les étapes pour le texte
-    # On garde l'imputation et le OneHotEncoder
+
+    # 3. Étapes pour les colonnes texte
     categorical_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='most_frequent')), 
-        ('onehot', OneHotEncoder(handle_unknown='ignore'))    
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('onehot', OneHotEncoder(handle_unknown='ignore'))
     ])
-    
+
     # 4. Assembler le tout
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', numeric_transformer, numeric_features),
             ('cat', categorical_transformer, categorical_features)
         ])
-    
+
     return preprocessor
