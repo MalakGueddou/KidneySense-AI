@@ -1,113 +1,201 @@
-import os
-import sys
-
+import json
+from pathlib import Path
 import joblib
-import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-from sklearn.base import clone
-from sklearn.ensemble import RandomForestClassifier
+
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (accuracy_score, precision_score, recall_score,
-                             f1_score, roc_auc_score, make_scorer,
-                             confusion_matrix, ConfusionMatrixDisplay)
-from sklearn.model_selection import (train_test_split, StratifiedKFold,
-                                     cross_validate)
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    brier_score_loss,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import StandardScaler
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from src.preprocessing import get_preprocessor
 
-# 1. Charger les données nettoyées
-print("Chargement des données...")
-df = pd.read_csv('data/clean_kidney_disease.csv')
-df['class'] = df['class'].astype(str).str.lower().str.strip()
-df = df[df['class'].isin(['ckd', 'notckd'])]
+# ==============================================================================
+# 1. DÉFINITION DES VARIABLES DU MODÈLE 1
+# ==============================================================================
 
-# 2. Séparer X et y
-X = df.drop('class', axis=1)
-y = df['class']
+NUM_FEATURES = ["age", "bp", "sg", "al", "su", "bgr", "bu", "sc", "sod", "pot", "hemo", "pcv", "wc", "rc"]
+BIN_FEATURES = ["rbc", "pc", "pcc", "ba", "htn", "dm", "cad", "appet", "pe", "ane"]
+ALL_FEATURES = NUM_FEATURES + BIN_FEATURES
+TARGET_COL = "class"
 
-# 3. Séparer train (80%) / test (20%), avec stratification
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y)
-print(f"Train : {len(X_train)} lignes | Test : {len(X_test)} lignes")
 
-# 4. Préprocesseur (sera appris dans le Pipeline, sur le train seulement)
-preprocessor = get_preprocessor(X_train)
+def resolve_clean_uci_path() -> Path:
+    candidates = [
+        Path("data/clean_kidney_disease.csv"), 
+        Path("clean_kidney_disease.csv"),
+        Path("data/clean/clean_kidney_disease.csv"),
+        Path("data/clean/uci_ckd_clean.csv"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    raise FileNotFoundError(
+        "Fichier introuvable : placez 'clean_kidney_disease.csv' à la racine ou dans 'data/clean/'."
+    )
 
-# 5. Modèles à comparer
-models = {
-    "Régression Logistique": LogisticRegression(max_iter=1000),
-    "Arbre de Décision": DecisionTreeClassifier(random_state=42),
-    "Forêt Aléatoire": RandomForestClassifier(random_state=42),
-}
 
-def make_pipeline(model):
-    return Pipeline(steps=[('preprocessor', clone(preprocessor)),
-                           ('classifier', clone(model))])
+def build_preprocessor() -> ColumnTransformer:
+    num_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+    ])
+    bin_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+    ])
+    return ColumnTransformer(
+        transformers=[
+            ("num", num_pipe, NUM_FEATURES),
+            ("bin", bin_pipe, BIN_FEATURES),
+        ],
+        remainder="drop",
+    )
 
-# 6. Validation croisée (sur le TRAIN uniquement) pour choisir le modèle
-cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-scoring = {
-    'accuracy': 'accuracy',
-    'precision': make_scorer(precision_score, pos_label='ckd'),
-    'recall': make_scorer(recall_score, pos_label='ckd'),
-    'f1': make_scorer(f1_score, pos_label='ckd'),
-    'roc_auc': 'roc_auc',
-}
 
-print("\n--- Validation croisée 5 plis (train seulement) ---")
-cv_f1 = {}
-for name, model in models.items():
-    res = cross_validate(make_pipeline(model), X_train, y_train,
-                         cv=cv, scoring=scoring)
-    print(f"\n{name}")
-    for m in scoring:
-        vals = res[f'test_{m}']
-        print(f"  {m:10s}: {vals.mean():.3f} ± {vals.std():.3f}")
-    cv_f1[name] = res['test_f1'].mean()
+def evaluate_on_test(model_name: str, pipe: Pipeline, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
+    y_pred = pipe.predict(X_test)
+    y_prob = pipe.predict_proba(X_test)[:, 1]
+    tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
 
-# 7. Le meilleur modèle est celui qui a le meilleur F1 en validation croisée
-best_model_name = max(cv_f1, key=cv_f1.get)
-print(f"\nMeilleur modèle (F1 en validation croisée) : {best_model_name}")
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    sensitivity = recall_score(y_test, y_pred)
 
-# 8. Évaluation finale sur le test (une seule fois, pour chaque modèle)
-print("\n--- Évaluation sur le jeu de test ---")
-fitted = {}
-for name, model in models.items():
-    clf = make_pipeline(model)
-    clf.fit(X_train, y_train)
-    fitted[name] = clf
+    metrics = {
+        "model": model_name,
+        "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
+        "roc_auc": round(float(roc_auc_score(y_test, y_prob)), 4),
+        "pr_auc": round(float(average_precision_score(y_test, y_prob)), 4),
+        "sensitivity_recall": round(float(sensitivity), 4),
+        "specificity": round(float(specificity), 4),
+        "f1_score": round(float(f1_score(y_test, y_pred)), 4),
+        "brier_score": round(float(brier_score_loss(y_test, y_prob)), 4),
+        "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
+    }
+    return metrics
 
-    y_pred = clf.predict(X_test)
-    proba_ckd = clf.predict_proba(X_test)[:, list(clf.classes_).index('ckd')]
-    tn, fp, fn, tp = confusion_matrix(
-        y_test, y_pred, labels=['notckd', 'ckd']).ravel()
 
-    print(f"\nModèle : {name}")
-    print(f"  Accuracy    : {accuracy_score(y_test, y_pred):.3f}")
-    print(f"  Precision   : {precision_score(y_test, y_pred, pos_label='ckd'):.3f}")
-    print(f"  Recall      : {recall_score(y_test, y_pred, pos_label='ckd'):.3f}")
-    print(f"  Spécificité : {tn / (tn + fp):.3f}")
-    print(f"  F1-Score    : {f1_score(y_test, y_pred, pos_label='ckd'):.3f}")
-    print(f"  ROC-AUC     : {roc_auc_score(y_test == 'ckd', proba_ckd):.3f}")
-    print(f"  Faux négatifs (CKD non détectés) : {fn}")
-    print(f"  Faux positifs                    : {fp}")
+def main():
+    # 1. Chargement des données propres
+    data_path = resolve_clean_uci_path()
+    df = pd.read_csv(data_path)
+    df = df.dropna(subset=[TARGET_COL]).copy()
 
-# 9. Matrice de confusion du meilleur modèle
-best_clf = fitted[best_model_name]
-y_pred_best = best_clf.predict(X_test)
-cm = confusion_matrix(y_test, y_pred_best, labels=['ckd', 'notckd'])
-disp = ConfusionMatrixDisplay(confusion_matrix=cm,
-                              display_labels=['CKD (Malade)', 'Non-CKD (Sain)'])
-disp.plot(cmap='Blues')
-plt.title(f"Matrice de confusion - {best_model_name}")
-plt.savefig('notebooks/matrice_confusion.png')
-print("\nMatrice de confusion sauvegardee dans notebooks/")
+    X = df[ALL_FEATURES]
+    y = df[TARGET_COL].astype(int)
 
-# 10. Sauvegarder les modèles pour Streamlit
-os.makedirs('models', exist_ok=True)
-joblib.dump(best_clf, 'models/best_model.pkl')
-joblib.dump(fitted["Forêt Aléatoire"], 'models/random_forest_model.pkl')
-print("Modeles sauvegardes dans models/ (best_model.pkl et random_forest_model.pkl)")
+    print(f"Dataset chargé : {data_path} ({len(df)} patients | CKD=1: {y.sum()}, Non-CKD=0: {(1-y).sum()})")
+
+    # 2. Split Train / Test stratifié (80 / 20)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.20, random_state=42, stratify=y
+    )
+
+    # 3. Candidats Modèle 1
+    candidates = {
+        "LogisticRegression": LogisticRegression(max_iter=1000, C=1.0, random_state=42),
+        "RandomForest": RandomForestClassifier(
+            n_estimators=300, max_depth=8, min_samples_leaf=2, random_state=42
+        ),
+        "GradientBoosting": GradientBoostingClassifier(
+            n_estimators=150, learning_rate=0.05, max_depth=3, random_state=42
+        ),
+    }
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    results = []
+    trained_pipelines = {}
+
+    print("\n--- VALIDATION CROISÉE (5-FOLD SUR TRAIN) & TEST SET ---")
+    for name, clf in candidates.items():
+        pipe = Pipeline([
+            ("preprocessor", build_preprocessor()),
+            ("classifier", clf),
+        ])
+
+        cv_scores = cross_validate(
+            pipe, X_train, y_train, cv=cv,
+            scoring=["roc_auc", "recall", "f1", "neg_brier_score"],
+            n_jobs=-1
+        )
+
+        # Entraînement final sur tout X_train
+        pipe.fit(X_train, y_train)
+        trained_pipelines[name] = pipe
+
+        test_metrics = evaluate_on_test(name, pipe, X_test, y_test)
+        test_metrics["cv_roc_auc_mean"] = round(float(cv_scores["test_roc_auc"].mean()), 4)
+        test_metrics["cv_recall_mean"] = round(float(cv_scores["test_recall"].mean()), 4)
+        test_metrics["cv_brier_mean"] = round(float(-cv_scores["test_neg_brier_score"].mean()), 4)
+        results.append(test_metrics)
+
+        print(
+            f"[{name:<18}] CV ROC-AUC={test_metrics['cv_roc_auc_mean']:.4f} | "
+            f"Test ROC-AUC={test_metrics['roc_auc']:.4f} | "
+            f"Sensibilité={test_metrics['sensitivity_recall']:.4f} | "
+            f"Spécificité={test_metrics['specificity']:.4f} | "
+            f"Brier={test_metrics['brier_score']:.4f} | "
+            f"FN={test_metrics['confusion_matrix']['fn']}"
+        )
+
+    # 4. Sélection du meilleur modèle (priorité : ROC-AUC, puis sensibilité, puis Brier bas)
+    best_res = sorted(
+        results,
+        key=lambda r: (r["cv_roc_auc_mean"], r["sensitivity_recall"], -r["brier_score"]),
+        reverse=True,
+    )[0]
+    best_name = best_res["model"]
+    best_pipe = trained_pipelines[best_name]
+
+    print(f"\n>>> Meilleur Modèle 1 sélectionné : {best_name}")
+    y_test_pred = best_pipe.predict(X_test)
+    print(classification_report(y_test, y_test_pred, target_names=["Non-CKD (0)", "CKD (1)"]))
+
+    # 5. Importance des variables (si RandomForest / GradientBoosting ou Coefs LogisticRegression)
+    clf_step = best_pipe.named_steps["classifier"]
+    print("--- Top 10 Variables les plus importantes ---")
+    if hasattr(clf_step, "feature_importances_"):
+        importances = clf_step.feature_importances_
+    else:
+        importances = np.abs(clf_step.coef_[0])
+
+    feat_imp = pd.Series(importances, index=ALL_FEATURES).sort_values(ascending=False)
+    for feat, val in feat_imp.head(10).items():
+        print(f"  - {feat:<10}: {val:.4f}")
+
+    # 6. Sauvegarde de l'artefact & métadonnées pour l'API / Orchestrateur
+    art_dir = Path("artifacts")
+    art_dir.mkdir(exist_ok=True)
+
+    model_path = art_dir / "model1_uci_pipeline.joblib"
+    joblib.dump(best_pipe, model_path)
+
+    meta = {
+        "best_model": best_name,
+        "features_order": ALL_FEATURES,
+        "num_features": NUM_FEATURES,
+        "bin_features": BIN_FEATURES,
+        "all_candidates_metrics": results,
+    }
+    meta_path = art_dir / "model1_metadata.json"
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+
+    print(f"\nModèle 1 sauvegardé : {model_path}")
+    print(f"Métadonnées sauvegardées : {meta_path}")
+
+
+if __name__ == "__main__":
+    main()
